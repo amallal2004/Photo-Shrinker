@@ -1,44 +1,62 @@
-# Photo Shrinker
+<div align="center">
+  <img src="public/logo.png" alt="Photo Shrinker logo" width="128" />
 
-A browser-based image compressor for people filling in upload forms that demand a
-file size in megabytes. Pick the limit the form states, get a JPEG that lands just
-under it.
+  <h1>Photo Shrinker</h1>
+  <p><strong>Fit your photo to an upload limit — without it ever leaving your device.</strong></p>
 
-Everything runs client-side. No upload, no backend, no server holding passport or
-ID photos.
+  <p>
+    <img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs&logoColor=white" height="20" />
+    <img alt="React" src="https://img.shields.io/badge/React-19-087ea4?style=flat-square&logo=react&logoColor=white" height="20" />
+    <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" height="20" />
+    <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-4-06b6d4?style=flat-square&logo=tailwindcss&logoColor=white" height="20" />
+    <img alt="No backend" src="https://img.shields.io/badge/backend-none-10b981?style=flat-square" height="20" />
+  </p>
+</div>
+
+---
+
+Government portals rarely say *"this photo is too big"*. They say **"max 10 MB"** — a number most people can't translate into anything they can act on. Open the image, look at a number they don't understand, guess, and get rejected.
+
+Pick the limit your form states. Get a JPEG that lands just under it.
+
+**Nothing is uploaded.** The whole thing runs in the browser tab, which matters when the photos in question are passports and ID documents.
+
+---
 
 ## What it does
 
-- **Always outputs JPEG**, whatever you upload. PNG is a poor fit for photographs,
-  and every browser's encoder produces a much smaller file for photographic
-  content.
-- **Fills transparency before converting.** JPEG has no alpha channel, so a
-  transparent PNG would otherwise come out with black rectangles. Pick the fill
-  colour yourself.
-- **Solves for the byte limit** rather than offering a quality slider that might
-  miss. The result is guaranteed to fit, or the tool says plainly that it can't.
-- **Respects a minimum pixel size** when the form states one, so it can't shrink
-  a photo into something the portal rejects for being too small.
-- **Tells you when the target is impossible** instead of quietly handing over a
-  file that would bounce.
+- **Always outputs JPEG.** PNG is a poor fit for photographs. Whatever you upload, you get a JPEG — which is usually dramatically smaller for this content.
+- **Fits the limit, or says why not.** The result is guaranteed to land under your target, or the tool tells you plainly that it can't.
+- **Protects a minimum size.** If your form requires a minimum pixel size, the photo is never shrunk below it. An image that's too small gets rejected just as firmly as one that's too big.
+- **Handles transparency.** JPEG has no alpha channel. Transparent PNGs would come out with black rectangles, so you pick the fill colour yourself.
+- **Before / after.** Drag the divider to see exactly what changed.
 
 ## How the solver works
 
-`src/lib/solver.ts` is a pure function with an injected encoder, which is what
-makes it testable without a browser.
+The hard part isn't encoding a JPEG — it's *guaranteeing* a byte ceiling. A quality slider can miss; this solves for the limit.
 
-1. Encode at full resolution and quality 0.75. If it fits, skip straight to a
-   quality search.
-2. JPEG size is close to linear in pixel count, so estimate the scale needed with
-   `sqrt(target / actual)` and re-encode.
-3. Correct with a few damped iterations (`× 0.95`) until the budget is met.
-4. Once under budget, **binary-search the quality back up**. Leftover bytes get
-   spent on quality rather than being wasted by over-shrinking.
-5. If the floor size still exceeds the target, return `impossible` with a reason.
+`src/lib/solver.ts` is a pure function with an injected encoder, which is what makes it testable without a browser.
 
-Dimensions are snapped to even numbers because JPEG's 4:2:0 chroma subsampling
-produces edge artifacts at odd sizes. Large reductions are downscaled by repeated
-halving rather than one big `drawImage`, which filters far more cleanly.
+1. Encode at full resolution, quality 0.75. If it fits, skip straight to step 4.
+2. JPEG size is close to linear in pixel count, so estimate the scale needed: `sqrt(target / actual)`.
+3. Correct with a few damped iterations until the budget is met.
+4. **Binary-search the quality back up.** Leftover bytes buy sharpness instead of being wasted on over-shrinking.
+5. If the smallest permitted image still exceeds the target, return `impossible` with a reason rather than quietly missing the limit.
+
+Two details that matter more than they look:
+
+- **Dimensions are snapped to even numbers.** JPEG's 4:2:0 chroma subsampling leaves visible artifacts on odd sizes.
+- **Large reductions are done by repeated halving**, not one `drawImage`. A single call averages only a limited neighbourhood per destination pixel, so a 4000 px source scaled to 600 px aliases badly — exactly the passport-photo case, where the face is small in frame.
+
+### Example
+
+| Target | Original | Result | Size | Quality |
+|---|---|---|---|---|
+| Under 10 MB | 3.8 MB | 2.9 MB | 4000 × 3000 | 94% |
+| Under 1 MB | 3.8 MB | **961 KB** | 3972 × 2980 | 76% |
+| Under 240 KB | 3.8 MB | **235.6 KB** | 1946 × 1460 | 76% |
+
+Note the middle row: it barely resizes. A naive compressor would shrink the image far more than necessary to hit the same byte count.
 
 ## Getting started
 
@@ -58,23 +76,30 @@ pnpm build       # static export into out/
 
 ## Deploying
 
-`next.config.ts` sets `output: "export"`, so the build produces a static bundle
-with no server component. `pnpm build` writes to `out/`.
+`next.config.ts` sets `output: "export"`, so the build produces a static bundle with no server component. `pnpm build` writes to `out/`.
 
-- **Cloudflare Pages** — build command `pnpm build`, output directory `out`
-- **Vercel** — detected automatically
-- **GitHub Pages** — build and publish `out/`
-- **nginx / any web server** — serve `out/` as-is
+| Platform | Build command | Output directory |
+|---|---|---|
+| Cloudflare Pages | `pnpm build` | `out` |
+| Vercel | *detected automatically* | — |
+| GitHub Pages | `pnpm build` | `out` |
+| nginx / any web server | `pnpm build` | serve `out/` as-is |
 
 ## Scope
 
-This resizes and recompresses. It **never crops**. Forms that specify a print size
-or aspect ratio (35×45mm, 2×2in) also specify framing and head position, which
-this tool does not attempt, so no photo presets are offered — only byte limits,
-which are what it can actually guarantee. Minimum pixel dimensions are exposed as
-an optional field for the forms that state them.
+This resizes and recompresses. It **never crops**.
 
-## Layout
+Forms that specify a print size or aspect ratio (35×45 mm, 2×2 in) also specify framing and head position, which this tool does not attempt. Offering a "passport photo" preset would promise framing it can't deliver, so only byte limits are offered — the thing it can actually guarantee.
+
+### Why there's no Web Worker
+
+Compression runs on the main thread, yielding between attempts with `scheduler.yield()` so the progress UI keeps painting.
+
+`new Worker(new URL("./worker.ts", import.meta.url))` is the obvious alternative, but Turbopack copies that target into `static/media/` **verbatim** instead of compiling it — a production build ships raw TypeScript that no browser can execute, while `next dev` works fine and hides the bug. A plain `.js` worker would run, but it couldn't import the solver without duplicating the algorithm into a second implementation that would silently drift from the tested one.
+
+Worth revisiting once Turbopack supports bundling worker entries, or by precompiling the worker into `public/`.
+
+## Project layout
 
 ```
 src/
@@ -91,23 +116,12 @@ src/
     └── compressor.ts       # decode → solve → encode pipeline
 ```
 
-## Why there is no Web Worker
-
-Compression runs on the main thread, yielding between encode attempts with
-`scheduler.yield()` so the progress UI keeps painting.
-
-A `new Worker(new URL("./worker.ts", import.meta.url))` worker is the obvious
-alternative, but Turbopack copies that target into `static/media/` **verbatim**
-instead of compiling it — the production build ships raw TypeScript that no
-browser can execute. A plain `.js` worker would run, but it could not import the
-solver without duplicating the algorithm into a second implementation that would
-silently drift from the tested one.
-
-If you want the worker back, either precompile it into `public/` or build with
-webpack. Revisit this once Turbopack supports bundling worker entries.
+The two pure modules hold all the domain logic and are the only ones worth reading first.
 
 ## Browser support
 
-Needs `createImageBitmap` and canvas `toBlob`, which covers Chrome, Edge,
-Firefox, and Safari 16.4+. Encoding runs at roughly 0.1–0.3s per pass for a 12MP
-photo.
+Needs `createImageBitmap` and canvas `toBlob` — Chrome, Edge, Firefox and Safari 16.4+. Encoding runs at roughly 0.1–0.3 s per pass for a 12 MP photo.
+
+## License
+
+MIT
